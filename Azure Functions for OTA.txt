@@ -1,0 +1,133 @@
+Azure functions for OTA, C# Script hosted in Azure Function App:
+
+
+checkfor new firmware:
+
+#r "Microsoft.WindowsAzure.Storage"
+#r "Newtonsoft.Json"
+
+using System.Net;
+using Microsoft.WindowsAzure.Storage;
+using Microsoft.WindowsAzure.Storage.Blob;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+
+public static async Task<HttpResponseMessage> Run(HttpRequestMessage req, TraceWriter log)
+{
+    const string blobName = "esp32_1.0.0.0.bin";
+    const string containerName = "esp32firmware";
+    const string storageConnectionString = "DefaultEndpointsProtocol=https;AccountName=watertankstorage;AccountKey=...;EndpointSuffix=core.windows.net";
+    const string latestVersion = "1.0.0.0";
+    
+
+    log.Info("C# HTTP trigger function processed a request.");
+    long blobSize = 0;
+
+    try
+    {
+        CloudStorageAccount account = CloudStorageAccount.Parse(storageConnectionString);
+        CloudBlobClient blobClient = account.CreateCloudBlobClient();
+
+        CloudBlobContainer container = blobClient.GetContainerReference(containerName);
+        CloudBlob blob = container.GetBlobReference(blobName);
+
+        await blob.FetchAttributesAsync();
+        blobSize = blob.Properties.Length;
+    }
+    catch (Exception e)
+    {
+        log.Error($"Exception: {e}");
+        return req.CreateResponse(HttpStatusCode.BadRequest, $"Error: {e.Message}");
+    }
+
+    var resp = new HttpResponseMessage(HttpStatusCode.OK);
+    
+    var json = JsonConvert.SerializeObject(new {latestVersion,  blobName, blobSize});
+    resp.Content = new StringContent(json);
+    return resp;
+}
+
+Firmware Download :
+
+#r "Microsoft.WindowsAzure.Storage"
+
+using System.Net;
+using Microsoft.WindowsAzure.Storage;
+using Microsoft.WindowsAzure.Storage.Blob;
+
+public static async Task<HttpResponseMessage> Run(HttpRequestMessage req, TraceWriter log)
+{
+    log.Info("C# HTTP trigger function processed a request.");
+
+    const string containerName = "esp32firmware";
+    const string storageConnectionString = "DefaultEndpointsProtocol=https;AccountName=watertankstorage;AccountKey=...;EndpointSuffix=core.windows.net";
+    // parse query parameter
+    string firmwareBlobName = req.GetQueryNameValuePairs()
+        .FirstOrDefault(q => string.Compare(q.Key, "firmwareBlobName", true) == 0)
+        .Value;
+
+    string offsetText = req.GetQueryNameValuePairs()
+        .FirstOrDefault(q => string.Compare(q.Key, "offset", true) == 0)
+        .Value;
+
+    string chunkSizeText = req.GetQueryNameValuePairs()
+        .FirstOrDefault(q => string.Compare(q.Key, "chunkSize", true) == 0)
+        .Value;
+
+    if (firmwareBlobName == null || offsetText == null || chunkSizeText == null)
+        return req.CreateResponse(HttpStatusCode.BadRequest, "Please pass a valid arguments");
+
+    int offset = 0;
+    int chunkSize = 0;
+    string result = "";
+    byte[] data;
+
+    try
+    {
+        offset = int.Parse(offsetText);
+        chunkSize = int.Parse(chunkSizeText);
+    
+        CloudStorageAccount account = CloudStorageAccount.Parse(storageConnectionString);
+        CloudBlobClient blobClient = account.CreateCloudBlobClient();
+
+        CloudBlobContainer container = blobClient.GetContainerReference(containerName);
+        CloudBlob blob = container.GetBlobReference(firmwareBlobName);
+
+        using (var blobStream = blob.OpenRead())
+        {
+            var buffer = new byte[chunkSize];
+            blobStream.Seek(offset, SeekOrigin.Begin);
+            int numBytesRead = await blobStream.ReadAsync(buffer, 0, chunkSize, new System.Threading.CancellationToken(false));
+
+            if (numBytesRead != chunkSize)
+            {
+                var trimmedBuffer = new byte[numBytesRead];
+                Array.Copy(buffer, trimmedBuffer, numBytesRead);
+                data = trimmedBuffer;
+            }
+            else
+            {
+                data = buffer;
+            }
+        }
+
+        char[] charArray = new char[data.Length * 2];
+        int length = Convert.ToBase64CharArray(data, 0, data.Length, charArray, 0, Base64FormattingOptions.None);
+        result = new string(charArray, 0, length);
+    }
+    catch (Exception e)
+    {
+        log.Error($"Exception: {e}");
+        return req.CreateResponse(HttpStatusCode.BadRequest, $"Error {e.Message}");
+    }
+    
+    var response = req.CreateResponse(HttpStatusCode.OK, result);
+    response.Content.Headers.ContentMD5 = System.Security.Cryptography.MD5.Create().ComputeHash(data);
+
+    return response;
+}
+
+
+
+    
+    

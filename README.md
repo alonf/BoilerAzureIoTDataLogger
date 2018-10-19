@@ -1,5 +1,7 @@
 # BoilerAzureIoTDataLogger
 The ESP32 device code that collects water tank temperature telemetry and sends it to an Azure IoT Hub.
+The device is an ESP32 with two thermistors (I use my 3D printer spare part) and an AC current sensor: 
+https://learn.openenergymonitor.org/electricity-monitoring/ct-sensors/interface-with-arduino?redirected=true
 
 To use this code, you need to install the ESP32 tool chain:
 https://docs.espressif.com/projects/esp-idf/en/latest/get-started/index.html
